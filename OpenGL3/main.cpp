@@ -157,7 +157,9 @@ void Init()
 
   unsigned int tex;
   int width, height;
-  initPNG(&tex, "cubemap.png", width, height);
+  // initPNG(&tex, "cubemap.png", width, height);
+  // initPNG(&tex, "grace_probe.png", width, height);
+  initPNG(&tex, "parabolic.png", width, height);
 
 
   eye = Vector3d(0, 0, 1000);
@@ -199,6 +201,7 @@ void SelectViewport(int view, bool clear)
 }
 
 bool showAxes = false;
+int showMap = 0;
 
 void DrawGrid()
 {
@@ -218,7 +221,6 @@ void DrawGrid()
   glEnd();
 }
 
-
 void DrawSurface()
 {
   for (int i = 0; i <= LOD; i++)
@@ -232,28 +234,42 @@ void DrawSurface()
       mapped.add(n);
       mapped.normalize();
 
-      // for sphere mapping
-      float padding_y = 1/3.0;
-      float padding_x = 1/4.0;
-      if (mapped.x >= std::abs(mapped.y) && mapped.x >= std::abs(mapped.z)) { // right
-        texCoords[i][j][0] = (-mapped.z / mapped.x + 1) / 2 / 4 + padding_x * 2;
-        texCoords[i][j][1] = (-mapped.y / mapped.x + 1) / 2 / 3 + padding_y;
-      } else if (mapped.y >= std::abs(mapped.x) && mapped.y >= std::abs(mapped.z)) { // top
-        texCoords[i][j][0] = (mapped.x / mapped.y + 1) / 2 / 4 + padding_x;
-        texCoords[i][j][1] = (mapped.z / mapped.y + 1) / 2 / 3;
-      } else if (mapped.z >= std::abs(mapped.x) && mapped.z >= std::abs(mapped.y)) { // front
-        texCoords[i][j][0] = (mapped.x / mapped.z + 1) / 2 / 4 + padding_x;
-        texCoords[i][j][1] = (-mapped.y / mapped.z + 1) / 2 / 3 + padding_y;
-      } else if (mapped.x <= -std::abs(mapped.y) && mapped.x <= -std::abs(mapped.z)) { // left
-        texCoords[i][j][0] = (-mapped.z / mapped.x + 1) / 2 / 4;
-        texCoords[i][j][1] = (mapped.y / mapped.x + 1) / 2 / 3 + padding_y;
-      } else if (mapped.y <= -std::abs(mapped.x) && mapped.y <= -std::abs(mapped.z)) { // bottom
-        texCoords[i][j][0] = (-mapped.x / mapped.y + 1) / 2 / 4 + padding_x;
-        texCoords[i][j][1] = (mapped.z / mapped.y + 1) / 2 / 3 + padding_y * 2;
-      } else if (mapped.z <= -std::abs(mapped.x) && mapped.z <= -std::abs(mapped.y)) { // back
-        texCoords[i][j][0] = (mapped.x / mapped.z + 1) / 2 / 4 + padding_x * 3;
-        texCoords[i][j][1] = (mapped.y / mapped.z + 1) / 2 / 3 + padding_y;
+      if (mapped.z >= 0) {
+        float parabolic_x = ((mapped.x / (2 * (1 + mapped.z))) + 0.5) / 2;
+        float parabolic_y = (-mapped.y / (2 * (1 + mapped.z))) + 0.5;
+        texCoords[i][j][0] = parabolic_x;
+        texCoords[i][j][1] = parabolic_y;
+      } else {
+        float parabolic_x = ((mapped.x / (2 * (1 - mapped.z))) + 0.5) / 2 + 0.5;
+        float parabolic_y = (-mapped.y / (2 * (1 - mapped.z))) + 0.5;
+        texCoords[i][j][0] = parabolic_x;
+        texCoords[i][j][1] = parabolic_y;
       }
+
+      // double sum = sqrt(mapped.x*mapped.x + mapped.y*mapped.y + pow(mapped.z+1,2));
+      // texCoords[i][j][0] = (mapped.x/sum + 1) / 2;
+      // texCoords[i][j][1] = (-mapped.y/sum + 1) / 2;
+      // float padding_y = 1/3.0;
+      // float padding_x = 1/4.0;
+      // if (mapped.x >= std::abs(mapped.y) && mapped.x >= std::abs(mapped.z)) { // right
+      //   texCoords[i][j][0] = (-mapped.z / mapped.x + 1) / 2 / 4 + padding_x * 2;
+      //   texCoords[i][j][1] = (-mapped.y / mapped.x + 1) / 2 / 3 + padding_y;
+      // } else if (mapped.y >= std::abs(mapped.x) && mapped.y >= std::abs(mapped.z)) { // top
+      //   texCoords[i][j][0] = (mapped.x / mapped.y + 1) / 2 / 4 + padding_x;
+      //   texCoords[i][j][1] = (mapped.z / mapped.y + 1) / 2 / 3;
+      // } else if (mapped.z >= std::abs(mapped.x) && mapped.z >= std::abs(mapped.y)) { // front
+      //   texCoords[i][j][0] = (mapped.x / mapped.z + 1) / 2 / 4 + padding_x;
+      //   texCoords[i][j][1] = (-mapped.y / mapped.z + 1) / 2 / 3 + padding_y;
+      // } else if (mapped.x <= -std::abs(mapped.y) && mapped.x <= -std::abs(mapped.z)) { // left
+      //   texCoords[i][j][0] = (-mapped.z / mapped.x + 1) / 2 / 4;
+      //   texCoords[i][j][1] = (mapped.y / mapped.x + 1) / 2 / 3 + padding_y;
+      // } else if (mapped.y <= -std::abs(mapped.x) && mapped.y <= -std::abs(mapped.z)) { // bottom
+      //   texCoords[i][j][0] = (-mapped.x / mapped.y + 1) / 2 / 4 + padding_x;
+      //   texCoords[i][j][1] = (mapped.z / mapped.y + 1) / 2 / 3 + padding_y * 2;
+      // } else if (mapped.z <= -std::abs(mapped.x) && mapped.z <= -std::abs(mapped.y)) { // back
+      //   texCoords[i][j][0] = (mapped.x / mapped.z + 1) / 2 / 4 + padding_x * 3;
+      //   texCoords[i][j][1] = (mapped.y / mapped.z + 1) / 2 / 3 + padding_y;
+      // }
     }
 
   glEnable(GL_TEXTURE_2D);
@@ -390,25 +406,188 @@ int ScreenShot()
 }
 
 bool saveScreens = false;
+void DrawParabolicMapWithCube()
+{
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity();
+  glOrtho(-width, width, -height, height, -100000, 100000);
+  gluLookAt(0, 0, 1, 0, 0, 0, 0, -1, 0);
+  glViewport(0, 0, width * 2, height * 2);
+  glScissor(0, 0, width * 2, height * 2);
+  glClearColor(1,1,1, 1);
+  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+  double showMapPoints[LOD+1][LOD+1][2];
+  double showMapTexCoords[LOD+1][LOD+1][2];
+
+  for (int i = 0; i <= LOD; i++)
+  {
+    float x = i * 1.0 / LOD;
+    for (int j = 0; j <= LOD; j++)
+    {
+      float y = j * 1.0 / LOD;
+      showMapPoints[i][j][0] = x * width;
+      showMapPoints[i][j][1] = y * height;
+
+
+      float parabolic_x, parabolic_y, parabolic_z;
+
+
+      // float parabolic_x = ((mapped.x / (2 * (1 + mapped.z))) + 0.5) / 2;
+      // float parabolic_y = (-mapped.y / (2 * (1 + mapped.z))) + 0.5;
+      // float parabolic_z = (1 - parabolic_x * parabolic_x + parabolic_y * parabolic_y) / 2;
+      if (i < LOD / 2) {
+        parabolic_x = (2 * x - 0.5) * 2;
+        parabolic_y = -(2 * y - 1);
+        parabolic_z = (1 - (parabolic_x * parabolic_x + parabolic_y * parabolic_y)) / 2;
+      } else {
+        parabolic_x = (2 * (x - 0.5) - 0.5) * 2;
+        parabolic_y = -(2 * y - 1);
+        parabolic_z = -(1 - (parabolic_x * parabolic_x + parabolic_y * parabolic_y)) / 2;
+      }
+      // printf("para : %f, %f, %f\n",parabolic_x, parabolic_y, parabolic_z);
+
+      Vector3d mapped = Vector3d(parabolic_x, parabolic_y, parabolic_z);
+      mapped.normalize();
+
+      float padding_y = 1/3.0;
+      float padding_x = 1/4.0;
+      if (mapped.x >= std::abs(mapped.y) && mapped.x >= std::abs(mapped.z)) { // right
+        showMapTexCoords[i][j][0] = (-mapped.z / mapped.x + 1) / 2 / 4 + padding_x * 2;
+        showMapTexCoords[i][j][1] = (-mapped.y / mapped.x + 1) / 2 / 3 + padding_y;
+      } else if (mapped.y >= std::abs(mapped.x) && mapped.y >= std::abs(mapped.z)) { // top
+        showMapTexCoords[i][j][0] = (mapped.x / mapped.y + 1) / 2 / 4 + padding_x;
+        showMapTexCoords[i][j][1] = (mapped.z / mapped.y + 1) / 2 / 3;
+      } else if (mapped.z >= std::abs(mapped.x) && mapped.z >= std::abs(mapped.y)) { // front
+        showMapTexCoords[i][j][0] = (mapped.x / mapped.z + 1) / 2 / 4 + padding_x;
+        showMapTexCoords[i][j][1] = (-mapped.y / mapped.z + 1) / 2 / 3 + padding_y;
+      } else if (mapped.x <= -std::abs(mapped.y) && mapped.x <= -std::abs(mapped.z)) { // left
+        showMapTexCoords[i][j][0] = (-mapped.z / mapped.x + 1) / 2 / 4;
+        showMapTexCoords[i][j][1] = (mapped.y / mapped.x + 1) / 2 / 3 + padding_y;
+      } else if (mapped.y <= -std::abs(mapped.x) && mapped.y <= -std::abs(mapped.z)) { // bottom
+        showMapTexCoords[i][j][0] = (-mapped.x / mapped.y + 1) / 2 / 4 + padding_x;
+        showMapTexCoords[i][j][1] = (mapped.z / mapped.y + 1) / 2 / 3 + padding_y * 2;
+      } else if (mapped.z <= -std::abs(mapped.x) && mapped.z <= -std::abs(mapped.y)) { // back
+        showMapTexCoords[i][j][0] = (mapped.x / mapped.z + 1) / 2 / 4 + padding_x * 3;
+        showMapTexCoords[i][j][1] = (mapped.y / mapped.z + 1) / 2 / 3 + padding_y;
+      }
+
+      // showMapTexCoords[i][j][0] = x;
+      // showMapTexCoords[i][j][1] = y;
+    }
+  }
+
+  glEnable(GL_TEXTURE_2D);
+  for (int i = 0; i < LOD; i++)
+  {
+    glBegin(GL_QUAD_STRIP);
+    for (int j = 0; j < LOD; j++)
+    {
+      glTexCoord2dv(showMapTexCoords[i][j]);
+      glVertex2dv(showMapPoints[i][j]);
+      glTexCoord2dv(showMapTexCoords[i + 1][j]);
+      glVertex2dv(showMapPoints[i + 1][j]);
+    }
+    glEnd();
+  }
+  glDisable(GL_TEXTURE_2D);
+  return;
+}
+
+void DrawParabolicMapWithSphere()
+{
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity();
+  glOrtho(-width, width, -height, height, -100000, 100000);
+  gluLookAt(0, 0, 1, 0, 0, 0, 0, -1, 0);
+  glViewport(0, 0, width * 2, height * 2);
+  glScissor(0, 0, width * 2, height * 2);
+  glClearColor(1,1,1, 1);
+  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+  double showMapPoints[LOD+1][LOD+1][2];
+  double showMapTexCoords[LOD+1][LOD+1][2];
+
+  for (int i = 0; i <= LOD; i++)
+  {
+    float x = i * 1.0 / LOD;
+    for (int j = 0; j <= LOD; j++)
+    {
+      float y = j * 1.0 / LOD;
+      showMapPoints[i][j][0] = x * width;
+      showMapPoints[i][j][1] = y * height;
+
+
+      float parabolic_x, parabolic_y, parabolic_z;
+
+
+      // float parabolic_x = ((mapped.x / (2 * (1 + mapped.z))) + 0.5) / 2;
+      // float parabolic_y = (-mapped.y / (2 * (1 + mapped.z))) + 0.5;
+      // float parabolic_z = (1 - parabolic_x * parabolic_x + parabolic_y * parabolic_y) / 2;
+      if (i < LOD / 2) {
+        parabolic_x = (2 * x - 0.5) * 2;
+        parabolic_y = -(2 * y - 1);
+        parabolic_z = (1 - (parabolic_x * parabolic_x + parabolic_y * parabolic_y)) / 2;
+      } else {
+        parabolic_x = (2 * (x - 0.5) - 0.5) * 2;
+        parabolic_y = -(2 * y - 1);
+        parabolic_z = -(1 - (parabolic_x * parabolic_x + parabolic_y * parabolic_y)) / 2;
+      }
+      // printf("para : %f, %f, %f\n",parabolic_x, parabolic_y, parabolic_z);
+
+      Vector3d mapped = Vector3d(parabolic_x, parabolic_y, parabolic_z);
+      mapped.normalize();
+
+      double sum = sqrt(mapped.x*mapped.x + mapped.y*mapped.y + pow(mapped.z+1,2));
+      showMapTexCoords[i][j][0] = (mapped.x/sum + 1) / 2;
+      showMapTexCoords[i][j][1] = (-mapped.y/sum + 1) / 2;
+
+      // showMapTexCoords[i][j][0] = x;
+      // showMapTexCoords[i][j][1] = y;
+    }
+  }
+
+  glEnable(GL_TEXTURE_2D);
+  for (int i = 0; i < LOD; i++)
+  {
+    glBegin(GL_QUAD_STRIP);
+    for (int j = 0; j < LOD; j++)
+    {
+      glTexCoord2dv(showMapTexCoords[i][j]);
+      glVertex2dv(showMapPoints[i][j]);
+      glTexCoord2dv(showMapTexCoords[i + 1][j]);
+      glVertex2dv(showMapPoints[i + 1][j]);
+    }
+    glEnd();
+  }
+  glDisable(GL_TEXTURE_2D);
+  return;
+}
 
 void displayCallback()
 {
-  glEnable(GL_SCISSOR_TEST);
-  for (int view = 0; view < 4; view++)
-  {
-    SelectViewport(view, true);
-    if (view == ROTATE)
-      DrawSurface();
-    else
-      DrawFrame();
-    DrawGrid();
-    if (view != ROTATE)
-      DrawControlPoints();
-  }
-  glDisable(GL_SCISSOR_TEST);
+  if (showMap == 1) {
+    DrawParabolicMapWithCube();
+  } else if (showMap == 2) {
+    DrawParabolicMapWithSphere();
+  } else {
+    glEnable(GL_SCISSOR_TEST);
+    for (int view = 0; view < 4; view++)
+    {
+      SelectViewport(view, true);
+      if (view == ROTATE)
+        DrawSurface();
+      else
+        DrawFrame();
+      DrawGrid();
+      if (view != ROTATE)
+        DrawControlPoints();
+    }
+    glDisable(GL_SCISSOR_TEST);
 
-  if (saveScreens)
-    ScreenShot();
+    if (saveScreens)
+      ScreenShot();
+  }
 
   glutSwapBuffers();
 }
@@ -429,6 +608,19 @@ void keyboardCallback(unsigned char key, int x, int y)
     saveScreens = !saveScreens;
   else if (key == 'a' || key == 'A')
     showAxes = !showAxes;
+  else if (key == 'm' || key == 'M') {
+    unsigned int tex;
+    int width, height;
+    showMap = showMap + 1;
+    showMap = showMap % 3;
+    if (showMap == 1) {
+      initPNG(&tex, "cubemap.png", width, height);
+    } else if (showMap == 2) {
+      initPNG(&tex, "grace_probe.png", width, height);
+    } else {
+      initPNG(&tex, "parabolic.png", width, height);
+    }
+  }
   glutPostRedisplay();
 }
 
