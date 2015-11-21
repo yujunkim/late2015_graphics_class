@@ -15,21 +15,35 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\..\..\..\Downloads\BezierSurfaceEditorSrc\main.cpp">
+    <Image Include="grace_probe.png">
+      <Filter>소스 파일</Filter>
+    </Image>
+    <Image Include="cubemap.png">
+      <Filter>소스 파일</Filter>
+    </Image>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="texture.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\Downloads\BezierSurfaceEditorSrc\viewport.cpp">
+    <ClCompile Include="main.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\Downloads\BezierSurfaceEditorSrc\curve.cpp">
+    <ClCompile Include="lodepng.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="viewport.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\..\..\..\Downloads\BezierSurfaceEditorSrc\curve.h">
+    <ClInclude Include="lodepng.h">
       <Filter>소스 파일</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\..\..\..\Downloads\BezierSurfaceEditorSrc\viewport.h">
+    <ClInclude Include="viewport.h">
+      <Filter>소스 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="texture.h">
       <Filter>소스 파일</Filter>
     </ClInclude>
   </ItemGroup>

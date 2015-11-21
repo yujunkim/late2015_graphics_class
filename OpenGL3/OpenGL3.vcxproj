@@ -10,6 +10,21 @@
       <Platform>Win32</Platform>
     </ProjectConfiguration>
   </ItemGroup>
+  <ItemGroup>
+    <Image Include="cubemap.png" />
+    <Image Include="grace_probe.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="lodepng.cpp" />
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="texture.cpp" />
+    <ClCompile Include="viewport.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="lodepng.h" />
+    <ClInclude Include="texture.h" />
+    <ClInclude Include="viewport.h" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{234F7602-BDE4-4A04-B420-53833D75DD1A}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
@@ -78,15 +93,6 @@
       <OptimizeReferences>true</OptimizeReferences>
     </Link>
   </ItemDefinitionGroup>
-  <ItemGroup>
-    <ClCompile Include="..\..\..\..\..\Downloads\BezierSurfaceEditorSrc\curve.cpp" />
-    <ClCompile Include="..\..\..\..\..\Downloads\BezierSurfaceEditorSrc\main.cpp" />
-    <ClCompile Include="..\..\..\..\..\Downloads\BezierSurfaceEditorSrc\viewport.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="..\..\..\..\..\Downloads\BezierSurfaceEditorSrc\curve.h" />
-    <ClInclude Include="..\..\..\..\..\Downloads\BezierSurfaceEditorSrc\viewport.h" />
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

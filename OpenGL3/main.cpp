@@ -1,602 +1,581 @@
-#include <GL/glut.h>
-#include "curve.h"
-#include "viewport.h"
-#include <vector>
 #include <algorithm>
-#include <iostream>
-#include <vector>
-#include <math.h>
+#include <GL/freeglut.h>
+#include "texture.h"
+#include <windows.h>
+#include "viewport.h"
 
-BicubicBezierSurface surface[2];
-GLsizei width = 800, height = 600;
-float viewportwidth = 400, viewportheight = 300;
+#define M_PI 3.14159265358979323846
 
-int selectedscene = 0;
-int selected = -1;
-bool isDrawControlMesh = true;
-bool isDottedLine = false;
+const int OOCP = 3;	//order of control points
+const int LOD = 128;	//level of detail, the number of lines each curve is divided into
+const int DIM = 3;
 
-Vector3d eye;
-Vector3d center;
-Vector3d upVector;
-bool isDragging = false;
-float radius;
+int combinations[(OOCP+1)/2+1];	//nCr
+double bezierConstants[LOD+1][OOCP+1];	//nCr * t^r * (1-t)^(n-r)
+double controlPoints[OOCP+1][OOCP+1][DIM];
+double intermediatePoints[OOCP+1][LOD+1][DIM];
+double surfacePoints[LOD+1][LOD+1][DIM];
+double surfaceNormals[LOD+1][LOD+1][DIM];
+double texCoords[LOD+1][LOD+1][2];
 
-#define RES 256
-
-float points[2][RES + 1][RES + 1][3];
-// float line_points[2][3];
+int selectedView, selectedPoint[2];
+const int INIT_SIZE = 800;
+int width = INIT_SIZE;
+int height = INIT_SIZE;
 
 int mouseButton = -1;
-int lastX = -1;
-int lastY = -1;
+int lastX, lastY;
+double radius;
+Vector3d eye, center, upVector;
 
-Point target;
-
-void RayTest(int mouse_x, int mouse_y)
+void CalculateCombinations()
 {
-  float x = mouse_x;
-  float y = height - mouse_y;
-
-  double model[16], proj[16];
-  glGetDoublev(GL_MODELVIEW_MATRIX, model);
-  glGetDoublev(GL_PROJECTION_MATRIX, proj);
-  int viewport[4] = { 0.0f, 0.0f, width, height };
-  double ax, ay, az, bx, by, bz;
-  gluUnProject(mouse_x, mouse_y, 0.0, model, proj, viewport, &ax, &ay, &az);
-  gluUnProject(mouse_x, mouse_y, 1.0, model, proj, viewport, &bx, &by, &bz);
-
-  double cx, cy, cz;
-  cx = ax - bx;
-  cy = ay - by;
-  cz = az - bz;
-
-  target[0] = ax - cx * ay / cy;
-  target[1] = az - cz * ay / cy;
+  combinations[0] = 1;
+  for (int i = 1; i <= OOCP; i++)
+  {
+    for (int j = i / 2; j >= 0; j--)
+      combinations[j] += combinations[j-1];
+    if (i % 2 == 1)
+      combinations[i/2+1] = combinations[i/2];
+  }
 }
 
-int hit_index(int x, int y, int scene)
+void CalculateBezierConstants()
 {
-  int xx, yy;
-  switch (scene)
+  for (int i = 0; i <= LOD; i++)
   {
-    case 1:
-      xx = 0, yy = 1;
-      break;
-    case 3:
-      xx = 0, yy = 2;
-      break;
-    case 4:
-      xx = 1, yy = 2;
-      break;
-  }
-  int min = 30;
-  int minp = -1;
-  for (int k = 0; k < 2; k++)
-  {
-    for (int i = 0; i < 4; i++)
+    double t = (double) i / LOD;
+    double it = 1-t;
+
+    for (int j = 0; j <= OOCP / 2; j++)
     {
-      for (int j = 0; j < 4; j++)
-      {
-        float tx = surface[k].control_pts[i][j][xx] - x;
-        float ty = surface[k].control_pts[i][j][yy] - y;
-        if ((tx * tx + ty * ty) < min)
-        {
-          min = (tx * tx + ty * ty);
-          minp = k * 100 + i * 10 + j;
-        }
-      }
+      bezierConstants[i][j] = combinations[j] * pow(t, j) * pow(it, OOCP - j);
+      bezierConstants[i][OOCP-j] = combinations[j] * pow(t, OOCP - j) * pow(it, j);
     }
   }
-
-  return minp;
 }
 
-void calc_surface()
+double Length(double x, double y, double z)
 {
-  for (int k = 0; k < 2; k++)
-    for (int i = 0; i <= RES; i++)
-      for (int j = 0; j <= RES; j++)
-      {
-        evaluate(&surface[k], i / (float)RES, j / (float)RES, points[k][i][j]);
-      }
+  return std::sqrt(x*x + y*y + z*z);
 }
 
-void init()
+void Normalize(double* v)
 {
-  for (int i = 0; i < 4; i++)
-    for (int j = 0; j < 4; j++)
-      SET_PT3(surface[0].control_pts[i][j], 50 * i + 50, 20 * i - 75 * (i == 2) + 200 - j * 50, j * 50 + 50);
-
-  for (int i = 0; i < 4; i++)
-    for (int j = 0; j < 4; j++)
-      SET_PT3(surface[1].control_pts[i][j], 50 * i + 45 * (i == 2) + 60 - j * 20, 70 * i + 20, j * 30 + 30);
-
-  calc_surface();
-
-  eye = Vector3d(750, 750, 750);
-  center = Vector3d(0, 0, 0);
-  upVector = Vector3d(0, 1, 0);
-
+  double l = Length(v[0], v[1], v[2]);
+  if (l > 0)
+    for (int i = 0; i < DIM; i++)
+      v[i] /= l;
 }
 
-void draw_intersect2(int s0i, int v0i, int s0e, int v0e, int s1i, int v1i, int s1e, int v1e){
-  int s0m, v0m, s1m, v1m;
-  Point min[2];
-  Point max[2];
-  float p[2][4][3];
-  int i = 0, j=0, k=0;
-
-  for(i=0;i<3;i++){
-    p[0][0][i] = points[0][s0i][v0i][i];
-    p[0][1][i] = points[0][s0e][v0i][i];
-    p[0][2][i] = points[0][s0i][v0e][i];
-    p[0][3][i] = points[0][s0e][v0e][i];
-    min[0][i] = 10000;
-    max[0][i] = 0;
-  }
-
-  for(i=0;i<3;i++){
-    p[1][0][i] = points[1][s1i][v1i][i];
-    p[1][1][i] = points[1][s1e][v1i][i];
-    p[1][2][i] = points[1][s1i][v1e][i];
-    p[1][3][i] = points[1][s1e][v1e][i];
-    min[1][i] = 10000;
-    max[1][i] = 0;
-  }
-
-  for(k=0;k<2;k++){
-    for(i=0;i<4;i++){
-      for(j=0;j<3;j++){
-        if(p[k][i][j] < min[k][j]) {
-          min[k][j] = p[k][i][j];
-        }
-        if(p[k][i][j] > max[k][j]) {
-          max[k][j] = p[k][i][j];
-        }
-      }
-    }
-  }
-
-  if (
-      min[0][0] < max[1][0] && max[0][0] > min[1][0] &&
-      min[0][1] < max[1][1] && max[0][1] > min[1][1] &&
-      min[0][2] < max[1][2] && max[0][2] > min[1][2]
-     )
-  {
-    if (
-        ((s0i + s0e) % 2 != 0) && ((v0i + v0e) % 2 != 0) &&
-        ((s1i + s1e) % 2 != 0) && ((v1i + v1e) % 2 != 0)
-       )
-    {
-      glPointSize(5.0f);
-      glColor3f(0.0f, 1.0f, 0.0f);
-      glBegin(GL_POINTS);
-      glVertex3f(p[0][0][0], p[0][0][1], p[0][0][2]);
-      glEnd();
-    }
-    else if (((s0i + s0e) % 2 != 0) && ((v0i + v0e) % 2 != 0))
-    {
-      s1m = ((s1i + s1e) / 2);
-      v1m = ((v1i + v1e) / 2);
-      draw_intersect2(s0i, v0i, s0e, v0e, s1i, v1i, s1m, v1m);
-      draw_intersect2(s0i, v0i, s0e, v0e, s1i, v1m, s1m, v1e);
-      draw_intersect2(s0i, v0i, s0e, v0e, s1m, v1i, s1e, v1m);
-      draw_intersect2(s0i, v0i, s0e, v0e, s1m, v1m, s1e, v1e);
-    }
-    else if (((s1i + s1e) % 2 != 0) && ((v1i + v1e) % 2 != 0))
-    {
-      s0m = ((s0i + s0e) / 2);
-      v0m = ((v0i + v0e) / 2);
-      draw_intersect2(s0i, v0i, s0m, v0m, s1i, v1i, s1e, v1e);
-      draw_intersect2(s0i, v0m, s0m, v0e, s1i, v1i, s1e, v1e);
-      draw_intersect2(s0m, v0i, s0e, v0m, s1i, v1i, s1e, v1e);
-      draw_intersect2(s0m, v0m, s0e, v0e, s1i, v1i, s1e, v1e);
-    }
-    else
-    {
-      if (
-          pow(max[0][0] - min[0][0], 2) + pow(max[0][1] - min[0][1], 2) + pow(max[0][2] - min[0][2], 2) >
-          pow(max[1][0] - min[1][0], 2) + pow(max[1][1] - min[1][1], 2) + pow(max[1][2] - min[1][2], 2)
-         )
-      {
-        s0m = ((s0i + s0e) / 2);
-        v0m = ((v0i + v0e) / 2);
-        draw_intersect2(s0i, v0i, s0m, v0m, s1i, v1i, s1e, v1e);
-        draw_intersect2(s0i, v0m, s0m, v0e, s1i, v1i, s1e, v1e);
-        draw_intersect2(s0m, v0i, s0e, v0m, s1i, v1i, s1e, v1e);
-        draw_intersect2(s0m, v0m, s0e, v0e, s1i, v1i, s1e, v1e);
-      }
-      else
-      {
-        s1m = ((s1i + s1e) / 2);
-        v1m = ((v1i + v1e) / 2);
-        draw_intersect2(s0i, v0i, s0e, v0e, s1i, v1i, s1m, v1m);
-        draw_intersect2(s0i, v0i, s0e, v0e, s1i, v1m, s1m, v1e);
-        draw_intersect2(s0i, v0i, s0e, v0e, s1m, v1i, s1e, v1m);
-        draw_intersect2(s0i, v0i, s0e, v0e, s1m, v1m, s1e, v1e);
-      }
-    }
-  }
-}
-
-
-
-void reshape_callback(GLint nw, GLint nh)
+void EvaluateSurface()
 {
-  width = nw;
-  height = nh;
-  viewportwidth = width / 2.0f;
-  viewportheight = height / 2.0f;
-  radius = std::sqrt(viewportwidth * viewportwidth + viewportheight * viewportheight) / 2;
-  glMatrixMode(GL_PROJECTION);
-  glLoadIdentity();
+  for (int i = 0; i <= OOCP; i++)
+    for (int j = 0; j <= LOD; j++)
+      for (int axis = 0; axis < DIM; axis++)
+      {
+        intermediatePoints[i][j][axis] = 0;
+        for (int l = 0; l <= OOCP; l++)
+          intermediatePoints[i][j][axis] += bezierConstants[j][l] * controlPoints[l][i][axis];
+      }
+
+  for (int i = 0; i <= LOD; i++)
+    for (int j = 0; j <= LOD; j++)
+      for (int axis = 0; axis < DIM; axis++)
+      {
+        surfacePoints[i][j][axis] = 0;
+        for (int l = 0; l <= OOCP; l++)
+          surfacePoints[i][j][axis] += bezierConstants[j][l] * intermediatePoints[l][i][axis];
+      }
+
+  for (int i = 0; i <= LOD; i++)
+    for (int j = 0; j <= LOD; j++)
+    {
+      double tangents[4][DIM], normals[4][DIM];
+
+      for (int axis = 0; axis < DIM; axis++)
+      {
+        tangents[0][axis] = j > 0? surfacePoints[i][j-1][axis] - surfacePoints[i][j][axis] : 0;
+        tangents[1][axis] = i < LOD? surfacePoints[i+1][j][axis] - surfacePoints[i][j][axis] : 0;
+        tangents[2][axis] = j < LOD? surfacePoints[i][j+1][axis] - surfacePoints[i][j][axis] : 0;
+        tangents[3][axis] = i > 0? surfacePoints[i-1][j][axis] - surfacePoints[i][j][axis] : 0;
+      }
+
+      for (int d = 0; d < 4; d++)
+      {
+        int c = (d + 1) % 4;
+        normals[d][0] = tangents[c][1]*tangents[d][2] - tangents[c][2]*tangents[d][1];
+        normals[d][1] = tangents[c][2]*tangents[d][0] - tangents[c][0]*tangents[d][2];
+        normals[d][2] = tangents[c][0]*tangents[d][1] - tangents[c][1]*tangents[d][0];
+        Normalize(normals[d]);
+      }
+
+      for (int axis = 0; axis < DIM; axis++)
+      {
+        surfaceNormals[i][j][axis] = 0;
+        for (int d = 0; d < 4; d++)
+          surfaceNormals[i][j][axis] += normals[d][axis];
+      }
+
+      Normalize(surfaceNormals[i][j]);
+    }
 }
 
-void display_callback()
+void InitPoints()
 {
-  glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
-  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  for (int i = 0; i <= OOCP; i++)
+    for (int j = 0; j <= OOCP; j++)
+    {
+      controlPoints[i][j][0] = INIT_SIZE * 0.7 * (2 * i / (double) OOCP - 1);
+      controlPoints[i][j][1] = INIT_SIZE * 0.7 * (1 - 2 * j / (double) OOCP);
+      controlPoints[i][j][2] = INIT_SIZE * (0.5 - std::abs((double)i / OOCP - 0.5) - std::abs((double)j / OOCP - 0.5));
+    }
 
-  glViewport(0, 0, width, height);
-  glMatrixMode(GL_PROJECTION);
-  glLoadIdentity();
-  glMatrixMode(GL_MODELVIEW);
-  glLoadIdentity();
-  glColor3f(0, 0, 0);
-  glBegin(GL_LINES);
-  glVertex3f(-1, 0, 0);
-  glVertex3f(1, 0, 0);
-  glEnd();
-  glBegin(GL_LINES);
-  glVertex3f(0, -1, 0);
-  glVertex3f(0, 1, 0);
-  glEnd();
+  EvaluateSurface();
+  selectedView = -1;
+}
 
-  glPointSize(8.0f);
-  // XY
-  glViewport(0, viewportheight, viewportwidth, viewportheight);
-  glLoadIdentity();
-  gluOrtho2D(0, (double)viewportwidth, 0, (double)viewportheight);
-  for (int k = 0; k < 2; k++)
-  {
-    if (k == 0)
-      glColor3f(1.0f, 0.0f, 0.0f);
-    else
-      glColor3f(0.0f, 1.0f, 0.0f);
-    glBegin(GL_POINTS);
-    for (int i = 0; i < 4; i++)
-      for (int j = 0; j < 4; j++)
-        glVertex2f(surface[k].control_pts[i][j][0], surface[k].control_pts[i][j][1]);
-    glEnd();
-  }
+float thickness = 1.5;
 
-  for (int k = 0; k < 2; k++)
-  {
-    if (k == 0)
-      glColor3f(1.0f, 0.0f, 0.0f);
-    else
-      glColor3f(0.0f, 1.0f, 0.0f);
-    glBegin(GL_LINES);
-    for (int i = 0; i < 4; i++)
-      for (int j = 0; j < 3; j++)
-      {
-        glVertex2f(surface[k].control_pts[i][j][0], surface[k].control_pts[i][j][1]);
-        glVertex2f(surface[k].control_pts[i][j + 1][0], surface[k].control_pts[i][j + 1][1]);
-        glVertex2f(surface[k].control_pts[j][i][0], surface[k].control_pts[j][i][1]);
-        glVertex2f(surface[k].control_pts[j + 1][i][0], surface[k].control_pts[j + 1][i][1]);
-      }
-    glEnd();
-  }
-
-  // XZ
-  glViewport(0, 0, viewportwidth, viewportheight);
-  glLoadIdentity();
-  gluOrtho2D(0, (double)viewportwidth, 0, (double)viewportheight);
-  for (int k = 0; k < 2; k++)
-  {
-    if (k == 0)
-      glColor3f(1.0f, 0.0f, 0.0f);
-    else
-      glColor3f(0.0f, 1.0f, 0.0f);
-    glBegin(GL_POINTS);
-    for (int i = 0; i < 4; i++)
-      for (int j = 0; j < 4; j++)
-        glVertex2f(surface[k].control_pts[i][j][0], surface[k].control_pts[i][j][2]);
-    glEnd();
-  }
-
-  for (int k = 0; k < 2; k++)
-  {
-    if (k == 0)
-      glColor3f(1.0f, 0.0f, 0.0f);
-    else
-      glColor3f(0.0f, 1.0f, 0.0f);
-    glBegin(GL_LINES);
-    for (int i = 0; i < 4; i++)
-      for (int j = 0; j < 3; j++)
-      {
-        glVertex2f(surface[k].control_pts[i][j][0], surface[k].control_pts[i][j][2]);
-        glVertex2f(surface[k].control_pts[i][j + 1][0], surface[k].control_pts[i][j + 1][2]);
-        glVertex2f(surface[k].control_pts[j][i][0], surface[k].control_pts[j][i][2]);
-        glVertex2f(surface[k].control_pts[j + 1][i][0], surface[k].control_pts[j + 1][i][2]);
-      }
-    glEnd();
-  }
-
-  // YZ
-  glViewport(viewportwidth, 0, viewportwidth, viewportheight);
-  glLoadIdentity();
-  gluOrtho2D(0, (double)viewportwidth, 0, (double)viewportheight);
-  for (int k = 0; k < 2; k++)
-  {
-    if (k == 0)
-      glColor3f(1.0f, 0.0f, 0.0f);
-    else
-      glColor3f(0.0f, 1.0f, 0.0f);
-    glBegin(GL_POINTS);
-    for (int i = 0; i < 4; i++)
-      for (int j = 0; j < 4; j++)
-        glVertex2f(surface[k].control_pts[i][j][1], surface[k].control_pts[i][j][2]);
-    glEnd();
-  }
-
-  for (int k = 0; k < 2; k++)
-  {
-    if (k == 0)
-      glColor3f(1.0f, 0.0f, 0.0f);
-    else
-      glColor3f(0.0f, 1.0f, 0.0f);
-    glBegin(GL_LINES);
-    for (int i = 0; i < 4; i++)
-      for (int j = 0; j < 3; j++)
-      {
-        glVertex2f(surface[k].control_pts[i][j][1], surface[k].control_pts[i][j][2]);
-        glVertex2f(surface[k].control_pts[i][j + 1][1], surface[k].control_pts[i][j + 1][2]);
-        glVertex2f(surface[k].control_pts[j][i][1], surface[k].control_pts[j][i][2]);
-        glVertex2f(surface[k].control_pts[j + 1][i][1], surface[k].control_pts[j + 1][i][2]);
-      }
-    glEnd();
-  }
-
-  // 3D
-  glViewport(viewportwidth, viewportheight, viewportwidth, viewportheight);
-  glMatrixMode(GL_PROJECTION);
-  glLoadIdentity();
-  gluPerspective(25, width / (double)height, 0.1, 25000);
-
-  glMatrixMode(GL_MODELVIEW);
-  glLoadIdentity();
-  gluLookAt(eye.x, eye.y, eye.z, center.x, center.y, center.z, upVector.x, upVector.y, upVector.z);
+void Init()
+{
+  glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
+  glutInitWindowPosition(300, 100);
+  glutInitWindowSize(width, height);
+  glutCreateWindow("2015 Fall Computer Graphics HW #3-4 Example");
 
   glEnable(GL_DEPTH_TEST);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glEnable(GL_BLEND);
+  glEnable(GL_POINT_SMOOTH);
+  glEnable(GL_LINE_SMOOTH);
+  glPointSize(6 * thickness);
+
+  CalculateCombinations();
+  CalculateBezierConstants();
+  InitPoints();
+
+  unsigned int tex;
+  int width, height;
+  initPNG(&tex, "cubemap.png", width, height);
+
+
+  eye = Vector3d(0, 0, 1000);
+  center = Vector3d(0, 0, 0);
+  upVector = Vector3d(0, 1, 0);
+}
+
+enum {FRONT, UP, LEFT, ROTATE};
+
+void SelectViewport(int view, bool clear)
+{
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity();
+  glOrtho(-width, width, -height, height, -100000, 100000);
+
+  if (view == FRONT)
+    gluLookAt(0, 0, 1, 0, 0, 0, 0, 1, 0);
+  else if (view == UP)
+    gluLookAt(0, 1, 0, 0, 0, 0, 0, 0, -1);
+  else if (view == LEFT)
+    gluLookAt(1, 0, 0, 0, 0, 0, 0, 1, 0);
+  else
+  {
+    gluLookAt(eye.x, eye.y, eye.z, center.x, center.y, center.z, upVector.x, upVector.y, upVector.z);
+  }
+
+  int w = width / 2;
+  int h = height / 2;
+  int x = (view == LEFT || view == ROTATE)? w : 0;
+  int y = (view == UP || view == ROTATE)? h : 0;
+  glViewport(x, y, w, h);
+
+  if (clear)
+  {
+    glScissor(x, y, w, h);
+    glClearColor(view < 2? 0.9f : 1, view % 2 == 0? 0.9f : 1, view > 0 && view < 3? 0.9f : 1, 1);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  }
+}
+
+bool showAxes = false;
+
+void DrawGrid()
+{
+  double length = INIT_SIZE / 2;
+
+  glLineWidth(2 * thickness);
   glBegin(GL_LINES);
-  glColor3f(1.0f, 0, 0);
-  glVertex3f(0, 0, 0);
-  glVertex3f(500.0f, 0, 0);
-  glColor3f(0, 1.0f, 0);
-  glVertex3f(0, 0, 0);
-  glVertex3f(0, 500.0f, 0);
-  glColor3f(0, 0, 1.0f);
-  glVertex3f(0, 0, 0);
-  glVertex3f(0, 0, 500.0f);
-  glEnd();
 
-  glColor3f(1.0f, 0.75f, 0.75f);
-  glBegin(GL_QUADS);
-  for (int i = 0; i < RES; i++)
-  {
-    for (int j = 0; j < RES; j++)
+  if (showAxes)
+    for (int axis = 0; axis < DIM; axis++)
     {
-      glVertex3f(points[0][i][j][0], points[0][i][j][1], points[0][i][j][2]);
-      glVertex3f(points[0][i + 1][j][0], points[0][i + 1][j][1], points[0][i + 1][j][2]);
-      glVertex3f(points[0][i + 1][j + 1][0], points[0][i + 1][j + 1][1], points[0][i + 1][j + 1][2]);
-      glVertex3f(points[0][i][j + 1][0], points[0][i][j + 1][1], points[0][i][j + 1][2]);
+      glColor3f(axis == 0, axis == 1, axis == 2);
+      glVertex3d(0, 0, 0);
+      glVertex3d(length*(axis == 0), length*(axis == 1), length*(axis == 2));
     }
-  }
-  glEnd();
 
-  glColor3f(0, 0.75f, 0.75f);
-  glBegin(GL_QUADS);
-  for (int i = 0; i < RES; i++)
-  {
-    for (int j = 0; j < RES; j++)
+  glEnd();
+}
+
+
+void DrawSurface()
+{
+  for (int i = 0; i <= LOD; i++)
+    for (int j = 0; j <= LOD; j++)
     {
-      glVertex3f(points[1][i][j][0], points[1][i][j][1], points[1][i][j][2]);
-      glVertex3f(points[1][i + 1][j][0], points[1][i + 1][j][1], points[1][i + 1][j][2]);
-      glVertex3f(points[1][i + 1][j + 1][0], points[1][i + 1][j + 1][1], points[1][i + 1][j + 1][2]);
-      glVertex3f(points[1][i][j + 1][0], points[1][i][j + 1][1], points[1][i][j + 1][2]);
-    }
-  }
-  glEnd();
+      // calculating reflecting vector
+      Vector3d mapped;
+      mapped.sub(center, eye);
+      Vector3d n = Vector3d(surfaceNormals[i][j][0], surfaceNormals[i][j][1], surfaceNormals[i][j][2]);
+      n.scale(-2 * n.dot(mapped));
+      mapped.add(n);
+      mapped.normalize();
 
-  draw_intersect2(0, 0, RES, RES, 0, 0, RES, RES);
+      // for sphere mapping
+      float padding_y = 1/3.0;
+      float padding_x = 1/4.0;
+      if (mapped.x >= std::abs(mapped.y) && mapped.x >= std::abs(mapped.z)) { // right
+        texCoords[i][j][0] = (-mapped.z / mapped.x + 1) / 2 / 4 + padding_x * 2;
+        texCoords[i][j][1] = (-mapped.y / mapped.x + 1) / 2 / 3 + padding_y;
+      } else if (mapped.y >= std::abs(mapped.x) && mapped.y >= std::abs(mapped.z)) { // top
+        texCoords[i][j][0] = (mapped.x / mapped.y + 1) / 2 / 4 + padding_x;
+        texCoords[i][j][1] = (mapped.z / mapped.y + 1) / 2 / 3;
+      } else if (mapped.z >= std::abs(mapped.x) && mapped.z >= std::abs(mapped.y)) { // front
+        texCoords[i][j][0] = (mapped.x / mapped.z + 1) / 2 / 4 + padding_x;
+        texCoords[i][j][1] = (-mapped.y / mapped.z + 1) / 2 / 3 + padding_y;
+      } else if (mapped.x <= -std::abs(mapped.y) && mapped.x <= -std::abs(mapped.z)) { // left
+        texCoords[i][j][0] = (-mapped.z / mapped.x + 1) / 2 / 4;
+        texCoords[i][j][1] = (mapped.y / mapped.x + 1) / 2 / 3 + padding_y;
+      } else if (mapped.y <= -std::abs(mapped.x) && mapped.y <= -std::abs(mapped.z)) { // bottom
+        texCoords[i][j][0] = (-mapped.x / mapped.y + 1) / 2 / 4 + padding_x;
+        texCoords[i][j][1] = (mapped.z / mapped.y + 1) / 2 / 3 + padding_y * 2;
+      } else if (mapped.z <= -std::abs(mapped.x) && mapped.z <= -std::abs(mapped.y)) { // back
+        texCoords[i][j][0] = (mapped.x / mapped.z + 1) / 2 / 4 + padding_x * 3;
+        texCoords[i][j][1] = (mapped.y / mapped.z + 1) / 2 / 3 + padding_y;
+      }
+    }
+
+  glEnable(GL_TEXTURE_2D);
+  for (int i = 0; i < LOD; i++)
+  {
+    glBegin(GL_QUAD_STRIP);
+    for (int j = 0; j <= LOD; j++)
+    {
+      glTexCoord2dv(texCoords[i][j]);
+      glVertex3dv(surfacePoints[i][j]);
+      glTexCoord2dv(texCoords[i+1][j]);
+      glVertex3dv(surfacePoints[i+1][j]);
+    }
+    glEnd();
+  }
+  glDisable(GL_TEXTURE_2D);
+}
+
+void DrawFrame()
+{
+  float hue = 0.7f;
+  glLineWidth(1 * thickness);
+  glColor3f(hue, hue, hue);
+
+  for (int i = 0; i <= OOCP; i++)
+  {
+    glBegin(GL_LINE_STRIP);
+    for (int j = 0; j <= OOCP; j++)
+      glVertex3dv(controlPoints[i][j]);
+    glEnd();
+  }
+
+  for (int j = 0; j <= OOCP; j++)
+  {
+    glBegin(GL_LINE_STRIP);
+    for (int i = 0; i <= OOCP; i++)
+      glVertex3dv(controlPoints[i][j]);
+    glEnd();
+  }
+}
+
+void DrawControlPoints()
+{
   glDisable(GL_DEPTH_TEST);
+  glBegin(GL_POINTS);
+  for (int j = 0; j <= OOCP; j++)
+  {
+    float k = j / (float) OOCP;
+    float a = 0.6f + 0.4f*k;
+    float b = 0.5f*k;
+    for (int i = 0; i <= OOCP; i++)
+    {
+      if (i == 0)
+        glColor3f(a, b, a);
+      else if (i == 1)
+        glColor3f(a, a, b);
+      else if (i == 2)
+        glColor3f(b, a, b);
+      else if (i == 3)
+        glColor3f(b, b, a);
+      else if (i == 4)
+        glColor3f(b, a, a);
+      else
+        glColor3f(a, b, b);
+      glVertex3dv(controlPoints[i][j]);
+    }
+  }
+  glEnd();
+  glEnable(GL_DEPTH_TEST);
+}
+
+int n = 0;
+
+int ScreenShot()
+{
+  if (n > 1000)
+    return 1;
+
+  // we will store the image data here
+  unsigned char *pixels;
+  // the thingy we use to write files
+  FILE * shot;
+  // we get the width/height of the screen into this array
+  int screenStats[4] = {0, 0, width, height};
+
+  // get the width/height of the window
+  //glGetIntegerv(GL_VIEWPORT, screenStats);
+
+  // generate an array large enough to hold the pixel data 
+  // (width*height*bytesPerPixel)
+  pixels = new unsigned char[screenStats[2]*screenStats[3]*3];
+  // read in the pixel data, TGA's pixels are BGR aligned
+  glReadPixels(0, 0, screenStats[2], screenStats[3], 0x80E0, //GL_BGR=0x80E0
+      GL_UNSIGNED_BYTE, pixels);
+
+  // open the file for writing. If unsucessful, return 1
+  char path[] = "screenshots/frame000.tga";
+
+  _itoa_s(n, path+(n < 10? 19 : n < 100? 18 : 17), 4, 10);
+  path[20] = '.';
+  path[21] = 't';
+  path[22] = 'g';
+  if((fopen_s(&shot, path, "wb")) != 0) return 1;
+  n++;
+
+  // this is the tga header it must be in the beginning of 
+  // every (uncompressed) .tga
+  unsigned char TGAheader[12]={0,0,2,0,0,0,0,0,0,0,0,0};
+  // the header that is used to get the dimensions of the .tga
+  // header[1]*256+header[0] - width
+  // header[3]*256+header[2] - height
+  // header[4] - bits per pixel
+  // header[5] - ?
+  unsigned char header[6]={((int)(screenStats[2]%256)),
+    ((int)(screenStats[2]/256)),
+    ((int)(screenStats[3]%256)),
+    ((int)(screenStats[3]/256)),24,0};
+
+  // write out the TGA header
+  fwrite(TGAheader, sizeof(unsigned char), 12, shot);
+  // write out the header
+  fwrite(header, sizeof(unsigned char), 6, shot);
+  // write the pixels
+  fwrite(pixels, sizeof(unsigned char), 
+      screenStats[2]*screenStats[3]*3, shot);
+
+  // close the file
+  fclose(shot);
+  // ROT the memory
+  delete [] pixels;
+
+  // return success
+  return 0;
+}
+
+bool saveScreens = false;
+
+void displayCallback()
+{
+  glEnable(GL_SCISSOR_TEST);
+  for (int view = 0; view < 4; view++)
+  {
+    SelectViewport(view, true);
+    if (view == ROTATE)
+      DrawSurface();
+    else
+      DrawFrame();
+    DrawGrid();
+    if (view != ROTATE)
+      DrawControlPoints();
+  }
+  glDisable(GL_SCISSOR_TEST);
+
+  if (saveScreens)
+    ScreenShot();
 
   glutSwapBuffers();
 }
 
-// void glutMouseFunc(void (*func)(int button, int state, int x, int y));
-void mouse_callback(GLint button, GLint action, GLint x, GLint y)
+void reshapeCallback(int nw, int nh)
 {
-  int scene = 0;
-  if (x < viewportwidth)
-  {
-    if (y < viewportheight)
-      scene = 1;
-    else
-    {
-      scene = 3;
-      y -= (int)viewportheight;
-    }
-  }
-  else
-  {
-    x -= (int)viewportwidth;
-    if (y < viewportheight)
-      scene = 2;
-    else
-    {
-      scene = 4;
-      y -= (int)viewportheight;
-    }
-  }
+  width = nw;
+  height = nh;
 
-  if (action == GLUT_UP)
-  {
-    isDragging = false;
-    mouseButton = -1;
-  }
+  radius = std::sqrt(width * width + height * height) / 4;
+}
 
-  if (scene == 2)
+void keyboardCallback(unsigned char key, int x, int y)
+{
+  if (key == 27)
+    exit(0);
+  else if (key == 's' || key == 'S')
+    saveScreens = !saveScreens;
+  else if (key == 'a' || key == 'A')
+    showAxes = !showAxes;
+  glutPostRedisplay();
+}
+
+double ToLocalX(int x)
+{
+  return 4*x - width;
+}
+
+double ToLocalY(int y)
+{
+  return height - 4*y;
+}
+
+void mouseCallback(int button, int action, int x, int y)
+{
+  if (action == GLUT_DOWN)
   {
-    if (action == GLUT_DOWN)
+    if (x > width / 2 && y < height / 2)
     {
-      mouseButton = button;
-      isDragging = true;
-      lastX = x;
+      selectedView = ROTATE;
+      lastX = x - width / 2;
       lastY = y;
     }
-  }
-  else
-  {
-    if (button == GLUT_LEFT_BUTTON)
+    else
     {
-      switch (action)
+      for (int i = 0; i <= OOCP; i++)
+        for (int j = 0; j <= OOCP; j++)
+        {
+          int possibleView = -1;
+          double cx, cy;
+
+          if (x < width / 2)
+            if (y > height / 2)
+            {
+              possibleView = FRONT;
+              cx = controlPoints[i][j][0];
+              cy = controlPoints[i][j][1];
+            }
+            else
+            {
+              possibleView = UP;
+              cx = controlPoints[i][j][0];
+              cy = -controlPoints[i][j][2];
+            }
+          else if (y > height / 2)
+          {
+            possibleView = LEFT;
+            cx = -controlPoints[i][j][2];
+            cy = controlPoints[i][j][1];
+          }
+
+
+          if (possibleView > -1 && Length(cx - ToLocalX(x % (width / 2)), cy - ToLocalY(y % (height / 2)), 0) < 20)
+          {
+            selectedView = possibleView;
+            selectedPoint[0] = i;
+            selectedPoint[1] = j;
+          }
+        }
+    }
+    mouseButton = button;
+  }
+  else if (action == GLUT_UP)
+  {
+    selectedView = -1;
+    mouseButton = -1;
+  }
+}
+
+void motionCallback(int x, int y)
+{
+  if (selectedView == FRONT)
+  {
+    controlPoints[selectedPoint[0]][selectedPoint[1]][0] = ToLocalX(x);
+    controlPoints[selectedPoint[0]][selectedPoint[1]][1] = ToLocalY(y - height/2);
+  }
+  else if (selectedView == UP)
+  {
+    controlPoints[selectedPoint[0]][selectedPoint[1]][0] = ToLocalX(x);
+    controlPoints[selectedPoint[0]][selectedPoint[1]][2] = -ToLocalY(y);
+  }
+  else if (selectedView == LEFT)
+  {
+    controlPoints[selectedPoint[0]][selectedPoint[1]][2] = -ToLocalX(x - width/2);
+    controlPoints[selectedPoint[0]][selectedPoint[1]][1] = ToLocalY(y - height/2);
+  }
+  else if (selectedView == ROTATE)
+  {
+    Vector3d lastP = getMousePoint(lastX, lastY, width / 2.0f, height / 2.0f, radius);
+    Vector3d currentP = getMousePoint(x - width / 2.0f, y, width / 2.0f, height / 2.0f, radius);
+
+    if (mouseButton == GLUT_LEFT_BUTTON)
+    {
+      Vector3d rotateVector;
+      rotateVector.cross(currentP, lastP);
+      double angle = -currentP.angle(lastP) * 2;
+      rotateVector = unProjectToEye(rotateVector, eye, center, upVector);
+
+      Vector3d dEye;
+      dEye.sub(center, eye);
+      dEye = rotate(dEye, rotateVector, -angle);
+      upVector = rotate(upVector, rotateVector, -angle);
+      eye.sub(center, dEye);
+    }
+    else if (mouseButton == GLUT_RIGHT_BUTTON) {
+      Vector3d dEye;
+      dEye.sub(center, eye);
+      double offset = 0.025;
+      if ((y - lastY) < 0) {
+        dEye.scale(1 - offset);
+      }
+      else {
+        dEye.scale(1 + offset);
+      }
+      eye.sub(center, dEye);
+    }
+    else if (mouseButton == GLUT_MIDDLE_BUTTON) {
+      double dx = x - width / 2.0f - lastX;
+      double dy = y - lastY;
+      if (dx != 0 || dy != 0)
       {
-        case GLUT_DOWN:
-          selectedscene = scene;
-          selected = hit_index(x, (int)viewportheight - y, scene);
-          break;
-        case GLUT_UP:
-          selected = -1;
-          break;
-        default: break;
+        Vector3d moveVector(dx, dy, 0);
+        moveVector = unProjectToEye(moveVector, eye, center, upVector);
+        moveVector.normalize();
+        double eyeDistance = Vector3d(eye).distance(Vector3d(center));
+        moveVector.scale(std::sqrt(dx*dx + dy*dy) / 1000 * eyeDistance);
+        center.add(moveVector);
+        eye.add(moveVector);
       }
     }
+    lastX = x - width / 2;
+    lastY = y;
   }
+
+  EvaluateSurface();
   glutPostRedisplay();
 }
 
-// void glutMotionFunc(void (*func)(int x, int y));
-void mouse_move_callback(GLint x, GLint y)
-{
-  Vector3d lastP = getMousePoint(lastX, lastY, viewportwidth, viewportheight, radius);
-  Vector3d currentP = getMousePoint(x - viewportwidth, y, viewportwidth, viewportheight, radius);
-
-  if (mouseButton == GLUT_LEFT_BUTTON)
-  {
-    Vector3d rotateVector;
-    rotateVector.cross(currentP, lastP);
-    double angle = -currentP.angle(lastP) * 2;
-    rotateVector = unProjectToEye(rotateVector, eye, center, upVector);
-
-    Vector3d dEye;
-    dEye.sub(center, eye);
-    dEye = rotate(dEye, rotateVector, -angle);
-    upVector = rotate(upVector, rotateVector, -angle);
-    eye.sub(center, dEye);
-  }
-  else if (mouseButton == GLUT_RIGHT_BUTTON){
-    Vector3d dEye;
-    dEye.sub(center, eye);
-    double offset = 0.025;
-    if ((y - lastY) < 0){
-      dEye.scale(1 - offset);
-    }
-    else {
-      dEye.scale(1 + offset);
-    }
-    eye.sub(center, dEye);
-  }
-  else if (mouseButton == GLUT_MIDDLE_BUTTON){
-    double dx = x - viewportwidth - lastX;
-    double dy = y - lastY;
-    if (dx != 0 || dy != 0)
-    {
-      Vector3d moveVector(dx, dy, 0);
-      moveVector = unProjectToEye(moveVector, eye, center, upVector);
-      moveVector.normalize();
-      double eyeDistance = Vector3d(eye).distance(Vector3d(center));
-      moveVector.scale(std::sqrt(dx*dx + dy*dy) / 1000 * eyeDistance);
-      center.add(moveVector);
-      eye.add(moveVector);
-    }
-  }
-
-  lastX = x - viewportwidth;
-  lastY = y;
-
-  if (selected != -1)
-  {
-    int xx = 0;
-    int yy = 0;
-    switch (selectedscene)
-    {
-      case 1:
-        xx = 0, yy = 1;
-        break;
-      case 3:
-        xx = 0, yy = 2;
-        y -= (int)viewportheight;
-        break;
-      case 4:
-        xx = 1, yy = 2;
-        x -= (int)viewportwidth;
-        y -= (int)viewportheight;
-        break;
-    }
-    x = std::max(x, 0);
-    x = std::min(x, (int)viewportwidth);
-    y = std::max((int)viewportheight - y, 0);
-    y = std::min(y, (int)viewportheight);
-    if (selected >= 100) {
-      surface[1].control_pts[(selected - 100) / 10][selected % 10][xx] = static_cast<float>(x);
-      surface[1].control_pts[(selected - 100) / 10][selected % 10][yy] = static_cast<float>(y);
-    } else {
-      surface[0].control_pts[selected / 10][selected % 10][xx] = static_cast<float>(x);
-      surface[0].control_pts[selected / 10][selected % 10][yy] = static_cast<float>(y);
-    }
-    calc_surface();
-  }
-
-  glutPostRedisplay();
-}
-
-// void glutKeyboardFunc(void (*func)(unsigned char key, int x, int y));
-void keyboard_callback(unsigned char key, int x, int y)
-{
-  switch (key)
-  {
-    case 'i': case 'I':
-      init();
-      break;
-    case 'l': case 'L':
-      isDottedLine ^= true;
-      break;
-    case 'c': case 'C':
-      isDrawControlMesh ^= true;
-      break;
-    case (27) : exit(0); break;
-    default: break;
-  }
-  glutPostRedisplay();
-}
-
-int main(int argc, char *argv[])
+int main(int argc, char **argv)
 {
   glutInit(&argc, argv);
-  glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);
-  glutInitWindowSize(width, height);
-  glutCreateWindow("Beizer Surface Editor");
-
-  init();
-  glutReshapeFunc(reshape_callback);
-  glutMouseFunc(mouse_callback);
-  glutMotionFunc(mouse_move_callback);
-  glutDisplayFunc(display_callback);
-  glutKeyboardFunc(keyboard_callback);
+  Init();
+  glutDisplayFunc(displayCallback);
+  glutReshapeFunc(reshapeCallback);
+  glutKeyboardFunc(keyboardCallback);
+  glutMouseFunc(mouseCallback);
+  glutMotionFunc(motionCallback);
   glutMainLoop();
-
   return 0;
 }
