@@ -7,7 +7,7 @@
 #include <vector>
 #include <math.h>
 
-BicubicBezierSurface surface;
+BicubicBezierSurface surface[2];
 GLsizei width = 800, height = 600;
 float viewportwidth = 400, viewportheight = 300;
 
@@ -24,8 +24,8 @@ float radius;
 
 #define RES 256
 
-float points[RES + 1][RES + 1][3];
-float line_points[2][3];
+float points[2][RES + 1][RES + 1][3];
+// float line_points[2][3];
 
 int mouseButton = -1;
 int lastX = -1;
@@ -72,28 +72,20 @@ int hit_index(int x, int y, int scene)
   }
   int min = 30;
   int minp = -1;
-  for (int i = 0; i < 4; i++)
+  for (int k = 0; k < 2; k++)
   {
-    for (int j = 0; j < 4; j++)
+    for (int i = 0; i < 4; i++)
     {
-      float tx = surface.control_pts[i][j][xx] - x;
-      float ty = surface.control_pts[i][j][yy] - y;
-      if ((tx * tx + ty * ty) < min)
+      for (int j = 0; j < 4; j++)
       {
-        min = (tx * tx + ty * ty);
-        minp = i * 10 + j;
+        float tx = surface[k].control_pts[i][j][xx] - x;
+        float ty = surface[k].control_pts[i][j][yy] - y;
+        if ((tx * tx + ty * ty) < min)
+        {
+          min = (tx * tx + ty * ty);
+          minp = k * 100 + i * 10 + j;
+        }
       }
-    }
-  }
-
-  for (int i = 0; i < 2; i++)
-  {
-    float tx = line_points[i][xx] - x;
-    float ty = line_points[i][yy] - y;
-    if ((tx * tx + ty * ty) < min)
-    {
-      min = (tx * tx + ty * ty);
-          minp = 100 + i;
     }
   }
 
@@ -102,18 +94,23 @@ int hit_index(int x, int y, int scene)
 
 void calc_surface()
 {
-  for (int i = 0; i <= RES; i++)
-    for (int j = 0; j <= RES; j++)
-    {
-      evaluate(&surface, i / (float)RES, j / (float)RES, points[i][j]);
-    }
+  for (int k = 0; k < 2; k++)
+    for (int i = 0; i <= RES; i++)
+      for (int j = 0; j <= RES; j++)
+      {
+        evaluate(&surface[k], i / (float)RES, j / (float)RES, points[k][i][j]);
+      }
 }
 
 void init()
 {
   for (int i = 0; i < 4; i++)
     for (int j = 0; j < 4; j++)
-      SET_PT3(surface.control_pts[i][j], 50 * i + 50, 20 * i - 75 * (i == 2) + 200 - j * 50, j * 50 + 50);
+      SET_PT3(surface[0].control_pts[i][j], 50 * i + 50, 20 * i - 75 * (i == 2) + 200 - j * 50, j * 50 + 50);
+
+  for (int i = 0; i < 4; i++)
+    for (int j = 0; j < 4; j++)
+      SET_PT3(surface[1].control_pts[i][j], 50 * i + 45 * (i == 2) + 60 - j * 20, 70 * i + 20, j * 30 + 30);
 
   calc_surface();
 
@@ -121,282 +118,108 @@ void init()
   center = Vector3d(0, 0, 0);
   upVector = Vector3d(0, 1, 0);
 
-  SET_PT3(line_points[0], 70, 170, 70);
-  SET_PT3(line_points[1], 170, 70, 130);
 }
 
-float calc_distance(int sir, int vir, int ser, int ver, int ss, int vv, Point p1, Point p2, Point p3, Point p4){
-  float s, v;
-  float dx, dy, dz;
-  s = (ss - sir) / (float)(ser - sir);
-  v = (vv - vir) / (float)(ver - vir);
-  dx = (1 - s) * (1 - v) * p1[0] + s * (1 - v) * p2[0] + (1 - s) * v * p3[0] + s * v * p4[0] - points[ss][vv][0];
-  dy = (1 - s) * (1 - v) * p1[1] + s * (1 - v) * p2[1] + (1 - s) * v * p3[1] + s * v * p4[1] - points[ss][vv][1];
-  dz = (1 - s) * (1 - v) * p1[2] + s * (1 - v) * p2[2] + (1 - s) * v * p3[2] + s * v * p4[2] - points[ss][vv][2];
-
-  return sqrt(dx*dx + dy*dy + dz*dz);
-}
-void draw_bi2(int sir, int vir, int ser, int ver){
-  glColor3f(0, 0, 0);
-  glBegin(GL_LINE_LOOP);
-  glVertex3f(points[sir][vir][0], points[sir][vir][1], points[sir][vir][2]);
-  glVertex3f(points[ser][vir][0], points[ser][vir][1], points[ser][vir][2]);
-  glVertex3f(points[ser][ver][0], points[ser][ver][1], points[ser][ver][2]);
-  glVertex3f(points[sir][ver][0], points[sir][ver][1], points[sir][ver][2]);
-  glEnd();
-}
-
-void draw_bi(int sir, int vir, int ser, int ver){
-  int sm, vm;
-  sm = ((sir + ser) / 2);
-  vm = ((vir + ver) / 2);
-  if (
-      ((sir + ser) % 2 == 0) &&
-      ((vir + ver) % 2 == 0) &&
-      (calc_distance(sir, vir, ser, ver, sm, vm, points[sir][vir], points[ser][vir], points[sir][ver], points[ser][ver]) > 1))
-  {
-    draw_bi(sir, vir, sm, vm);
-    draw_bi(sir, vm, sm, ver);
-    draw_bi(sm, vir, ser, vm);
-    draw_bi(sm, vm, ser, ver);
-  } else {
-    draw_bi2(sir,vir,ser,ver);
-  }
-}
-
-float line_equation(int given, float value, int want){
-  return (line_points[1][want] - line_points[0][want]) * (value - line_points[0][given]) / (line_points[1][given] - line_points[0][given]) + line_points[0][want];
-}
-
-bool between(float left, float middle, float right) {
-  return left <= middle && right >= middle;
-}
-
-bool determine_penetration(Point min, Point max){
-  float min_y_x, max_y_x, min_z_x, max_z_x, maxs_min, mins_max;
-  float ctrl_min, ctrl_max;
-
-  if (line_points[0][0] == line_points[1][0] && line_points[0][1] == line_points[1][1]) {
-    if (between(min[0], line_points[0][0], max[0]) && between(min[1], line_points[0][1], max[1])) {
-      if (
-          between(line_points[0][2], min[2], line_points[1][2]) ||
-          between(line_points[1][2], max[2], line_points[0][2]) ||
-          between(min[2], line_points[0][2], max[2])
-         )
-        return true;
-    }
-    return false;
-  }
-
-  if (line_points[0][0] == line_points[1][0] && line_points[0][2] == line_points[1][2]) {
-    if (between(min[0], line_points[0][0], max[0]) && between(min[2], line_points[0][2], max[2])) {
-      if (
-          between(line_points[0][1], min[1], line_points[1][1]) ||
-          between(line_points[1][1], max[1], line_points[0][1]) ||
-          between(min[1], line_points[0][1], max[1])
-         )
-        return true;
-    }
-    return false;
-  }
-
-  if (line_points[0][1] == line_points[1][1] && line_points[0][2] == line_points[1][2]) {
-    if (between(min[1], line_points[0][1], max[1]) && between(min[2], line_points[0][2], max[2])) {
-      if (
-          between(line_points[0][0], min[0], line_points[1][0]) ||
-          between(line_points[1][0], max[0], line_points[0][0]) ||
-          between(min[0], line_points[0][0], max[0])
-         ) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  if (line_points[0][0] == line_points[1][0]) {
-    if (between(min[0], line_points[0][0], max[0])){
-      mins_max = line_equation(2, min[2], 1);
-      maxs_min = line_equation(2, max[2], 1);
-      if (maxs_min < mins_max) {
-        mins_max = line_equation(2, max[2], 1);
-        maxs_min = line_equation(2, min[2], 1);
-      }
-
-      if (mins_max < min[1])
-        mins_max = min[1];
-      if (maxs_min > max[1])
-        maxs_min = max[1];
-
-      ctrl_min = line_points[0][1];
-      ctrl_max = line_points[1][1];
-      if (ctrl_min > ctrl_max) {
-        ctrl_min = line_points[1][1];
-        ctrl_max = line_points[0][1];
-      }
-      if (
-          mins_max < maxs_min &&
-          (
-            between(ctrl_min, mins_max, ctrl_max) ||
-            between(ctrl_min, maxs_min, ctrl_max) ||
-            between(mins_max, ctrl_min, maxs_min)
-          )
-         )
-        return true;
-    }
-    return false;
-  }
-
-  if (line_points[0][1] == line_points[1][1]) {
-    if (between(min[1], line_points[0][1], max[1])){
-      mins_max = line_equation(2, min[2], 0);
-      maxs_min = line_equation(2, max[2], 0);
-      if (maxs_min < mins_max) {
-        mins_max = line_equation(2, max[2], 0);
-        maxs_min = line_equation(2, min[2], 0);
-      }
-
-      if (mins_max < min[0])
-        mins_max = min[0];
-      if (maxs_min > max[0])
-        maxs_min = max[0];
-
-      ctrl_min = line_points[0][0];
-      ctrl_max = line_points[1][0];
-      if (ctrl_min > ctrl_max) {
-        ctrl_min = line_points[1][0];
-        ctrl_max = line_points[0][0];
-      }
-      if (
-          mins_max < maxs_min &&
-          (
-            between(ctrl_min, mins_max, ctrl_max) ||
-            between(ctrl_min, maxs_min, ctrl_max) ||
-            between(mins_max, ctrl_min, maxs_min)
-          )
-         )
-        return true;
-    }
-    return false;
-  }
-
-  if (line_points[0][2] == line_points[1][2]) {
-    if (between(min[2], line_points[0][2], max[2])){
-      mins_max = line_equation(1, min[1], 0);
-      maxs_min = line_equation(1, max[1], 0);
-      if (maxs_min < mins_max) {
-        mins_max = line_equation(1, max[1], 0);
-        maxs_min = line_equation(1, min[1], 0);
-      }
-
-      if (mins_max < min[0])
-        mins_max = min[0];
-      if (maxs_min > max[0])
-        maxs_min = max[0];
-
-      ctrl_min = line_points[0][0];
-      ctrl_max = line_points[1][0];
-      if (ctrl_min > ctrl_max) {
-        ctrl_min = line_points[1][0];
-        ctrl_max = line_points[0][0];
-      }
-      if (
-          mins_max < maxs_min &&
-          (
-            between(ctrl_min, mins_max, ctrl_max) ||
-            between(ctrl_min, maxs_min, ctrl_max) ||
-            between(mins_max, ctrl_min, maxs_min)
-          )
-         )
-        return true;
-    }
-    return false;
-  }
-
-  min_y_x = line_equation(1, min[1], 0);
-  max_y_x = line_equation(1, max[1], 0);
-  min_z_x = line_equation(2, min[2], 0);
-  max_z_x = line_equation(2, max[2], 0);
-  if (min_y_x > max_y_x) {
-    min_y_x = line_equation(1, max[1], 0);
-    max_y_x = line_equation(1, min[1], 0);
-  }
-  if (min_z_x > max_z_x) {
-    min_z_x = line_equation(2, max[2], 0);
-    max_z_x = line_equation(2, min[2], 0);
-  }
-
-  mins_max = min[0];
-  if (mins_max < min_y_x)
-    mins_max = min_y_x;
-  if (mins_max < min_z_x)
-    mins_max = min_z_x;
-
-  maxs_min = max[0];
-  if (maxs_min > max_y_x)
-    maxs_min = max_y_x;
-  if (maxs_min > max_z_x)
-    maxs_min = max_z_x;
-
-  ctrl_min = line_points[0][0];
-  ctrl_max = line_points[1][0];
-  if (ctrl_min > ctrl_max) {
-    ctrl_min = line_points[1][0];
-    ctrl_max = line_points[0][0];
-  }
-  if (
-      mins_max < maxs_min &&
-      (
-        between(ctrl_min, mins_max, ctrl_max) ||
-        between(ctrl_min, maxs_min, ctrl_max) ||
-        between(mins_max, ctrl_min, maxs_min)
-      )
-     )
-    return true;
-
-
-  return false;
-}
-
-void draw_intersect(int sir, int vir, int ser, int ver){
-  int sm, vm;
-  Point min;
-  Point max;
-  float p[4][3];
-  int i = 0, j=0;
+void draw_intersect2(int s0i, int v0i, int s0e, int v0e, int s1i, int v1i, int s1e, int v1e){
+  int s0m, v0m, s1m, v1m;
+  Point min[2];
+  Point max[2];
+  float p[2][4][3];
+  int i = 0, j=0, k=0;
 
   for(i=0;i<3;i++){
-    p[0][i] = points[sir][vir][i];
-    p[1][i] = points[ser][vir][i];
-    p[2][i] = points[sir][ver][i];
-    p[3][i] = points[ser][ver][i];
-    min[i] = 10000;
-    max[i] = 0;
+    p[0][0][i] = points[0][s0i][v0i][i];
+    p[0][1][i] = points[0][s0e][v0i][i];
+    p[0][2][i] = points[0][s0i][v0e][i];
+    p[0][3][i] = points[0][s0e][v0e][i];
+    min[0][i] = 10000;
+    max[0][i] = 0;
   }
 
-  for(i=0;i<4;i++){
-    for(j=0;j<3;j++){
-      if(p[i][j] < min[j]) {
-        min[j] = p[i][j];
-      }
-      if(p[i][j] > max[j]) {
-        max[j] = p[i][j];
+  for(i=0;i<3;i++){
+    p[1][0][i] = points[1][s1i][v1i][i];
+    p[1][1][i] = points[1][s1e][v1i][i];
+    p[1][2][i] = points[1][s1i][v1e][i];
+    p[1][3][i] = points[1][s1e][v1e][i];
+    min[1][i] = 10000;
+    max[1][i] = 0;
+  }
+
+  for(k=0;k<2;k++){
+    for(i=0;i<4;i++){
+      for(j=0;j<3;j++){
+        if(p[k][i][j] < min[k][j]) {
+          min[k][j] = p[k][i][j];
+        }
+        if(p[k][i][j] > max[k][j]) {
+          max[k][j] = p[k][i][j];
+        }
       }
     }
   }
-  sm = ((sir + ser) / 2);
-  vm = ((vir + ver) / 2);
-  if (((sir + ser) % 2 != 0) && ((vir + ver) % 2 != 0)) {
-    glColor3f(0.0f, 1.0f, 0.0f);
-    glBegin(GL_POINTS);
-    glVertex3f(p[0][0], p[0][1], p[0][2]);
-    glEnd();
-  } else if (determine_penetration(min, max)) {
-    draw_intersect(sir, vir, sm, vm);
-    draw_intersect(sir, vm, sm, ver);
-    draw_intersect(sm, vir, ser, vm);
-    draw_intersect(sm, vm, ser, ver);
+
+  if (
+      min[0][0] < max[1][0] && max[0][0] > min[1][0] &&
+      min[0][1] < max[1][1] && max[0][1] > min[1][1] &&
+      min[0][2] < max[1][2] && max[0][2] > min[1][2]
+     )
+  {
+    if (
+        ((s0i + s0e) % 2 != 0) && ((v0i + v0e) % 2 != 0) &&
+        ((s1i + s1e) % 2 != 0) && ((v1i + v1e) % 2 != 0)
+       )
+    {
+      glPointSize(5.0f);
+      glColor3f(0.0f, 1.0f, 0.0f);
+      glBegin(GL_POINTS);
+      glVertex3f(p[0][0][0], p[0][0][1], p[0][0][2]);
+      glEnd();
+    }
+    else if (((s0i + s0e) % 2 != 0) && ((v0i + v0e) % 2 != 0))
+    {
+      s1m = ((s1i + s1e) / 2);
+      v1m = ((v1i + v1e) / 2);
+      draw_intersect2(s0i, v0i, s0e, v0e, s1i, v1i, s1m, v1m);
+      draw_intersect2(s0i, v0i, s0e, v0e, s1i, v1m, s1m, v1e);
+      draw_intersect2(s0i, v0i, s0e, v0e, s1m, v1i, s1e, v1m);
+      draw_intersect2(s0i, v0i, s0e, v0e, s1m, v1m, s1e, v1e);
+    }
+    else if (((s1i + s1e) % 2 != 0) && ((v1i + v1e) % 2 != 0))
+    {
+      s0m = ((s0i + s0e) / 2);
+      v0m = ((v0i + v0e) / 2);
+      draw_intersect2(s0i, v0i, s0m, v0m, s1i, v1i, s1e, v1e);
+      draw_intersect2(s0i, v0m, s0m, v0e, s1i, v1i, s1e, v1e);
+      draw_intersect2(s0m, v0i, s0e, v0m, s1i, v1i, s1e, v1e);
+      draw_intersect2(s0m, v0m, s0e, v0e, s1i, v1i, s1e, v1e);
+    }
+    else
+    {
+      if (
+          pow(max[0][0] - min[0][0], 2) + pow(max[0][1] - min[0][1], 2) + pow(max[0][2] - min[0][2], 2) >
+          pow(max[1][0] - min[1][0], 2) + pow(max[1][1] - min[1][1], 2) + pow(max[1][2] - min[1][2], 2)
+         )
+      {
+        s0m = ((s0i + s0e) / 2);
+        v0m = ((v0i + v0e) / 2);
+        draw_intersect2(s0i, v0i, s0m, v0m, s1i, v1i, s1e, v1e);
+        draw_intersect2(s0i, v0m, s0m, v0e, s1i, v1i, s1e, v1e);
+        draw_intersect2(s0m, v0i, s0e, v0m, s1i, v1i, s1e, v1e);
+        draw_intersect2(s0m, v0m, s0e, v0e, s1i, v1i, s1e, v1e);
+      }
+      else
+      {
+        s1m = ((s1i + s1e) / 2);
+        v1m = ((v1i + v1e) / 2);
+        draw_intersect2(s0i, v0i, s0e, v0e, s1i, v1i, s1m, v1m);
+        draw_intersect2(s0i, v0i, s0e, v0e, s1i, v1m, s1m, v1e);
+        draw_intersect2(s0i, v0i, s0e, v0e, s1m, v1i, s1e, v1m);
+        draw_intersect2(s0i, v0i, s0e, v0e, s1m, v1m, s1e, v1e);
+      }
+    }
   }
 }
+
 
 
 void reshape_callback(GLint nw, GLint nh)
@@ -435,104 +258,106 @@ void display_callback()
   glViewport(0, viewportheight, viewportwidth, viewportheight);
   glLoadIdentity();
   gluOrtho2D(0, (double)viewportwidth, 0, (double)viewportheight);
-  glColor3f(1.0f, 0.0f, 0.0f);
-  glBegin(GL_POINTS);
-  for (int i = 0; i < 4; i++)
-    for (int j = 0; j < 4; j++)
-      glVertex2f(surface.control_pts[i][j][0], surface.control_pts[i][j][1]);
-  glEnd();
+  for (int k = 0; k < 2; k++)
+  {
+    if (k == 0)
+      glColor3f(1.0f, 0.0f, 0.0f);
+    else
+      glColor3f(0.0f, 1.0f, 0.0f);
+    glBegin(GL_POINTS);
+    for (int i = 0; i < 4; i++)
+      for (int j = 0; j < 4; j++)
+        glVertex2f(surface[k].control_pts[i][j][0], surface[k].control_pts[i][j][1]);
+    glEnd();
+  }
 
-  glColor3f(0.0f, 1.0f, 0.0f);
-  glBegin(GL_POINTS);
-  glVertex2f(line_points[0][0], line_points[0][1]);
-  glVertex2f(line_points[1][0], line_points[1][1]);
-  glEnd();
-
-  glBegin(GL_LINES);
-  glVertex2f(line_points[0][0], line_points[0][1]);
-  glVertex2f(line_points[1][0], line_points[1][1]);
-  glEnd();
-
-
-  glColor3f(1.0f, 0.0f, 0.0f);
-  glBegin(GL_LINES);
-  for (int i = 0; i < 4; i++)
-    for (int j = 0; j < 3; j++)
-    {
-      glVertex2f(surface.control_pts[i][j][0], surface.control_pts[i][j][1]);
-      glVertex2f(surface.control_pts[i][j + 1][0], surface.control_pts[i][j + 1][1]);
-      glVertex2f(surface.control_pts[j][i][0], surface.control_pts[j][i][1]);
-      glVertex2f(surface.control_pts[j + 1][i][0], surface.control_pts[j + 1][i][1]);
-    }
-  glEnd();
+  for (int k = 0; k < 2; k++)
+  {
+    if (k == 0)
+      glColor3f(1.0f, 0.0f, 0.0f);
+    else
+      glColor3f(0.0f, 1.0f, 0.0f);
+    glBegin(GL_LINES);
+    for (int i = 0; i < 4; i++)
+      for (int j = 0; j < 3; j++)
+      {
+        glVertex2f(surface[k].control_pts[i][j][0], surface[k].control_pts[i][j][1]);
+        glVertex2f(surface[k].control_pts[i][j + 1][0], surface[k].control_pts[i][j + 1][1]);
+        glVertex2f(surface[k].control_pts[j][i][0], surface[k].control_pts[j][i][1]);
+        glVertex2f(surface[k].control_pts[j + 1][i][0], surface[k].control_pts[j + 1][i][1]);
+      }
+    glEnd();
+  }
 
   // XZ
   glViewport(0, 0, viewportwidth, viewportheight);
   glLoadIdentity();
   gluOrtho2D(0, (double)viewportwidth, 0, (double)viewportheight);
-  glColor3f(1.0f, 0.0f, 0.0f);
-  glBegin(GL_POINTS);
-  for (int i = 0; i < 4; i++)
-    for (int j = 0; j < 4; j++)
-      glVertex2f(surface.control_pts[i][j][0], surface.control_pts[i][j][2]);
-  glEnd();
+  for (int k = 0; k < 2; k++)
+  {
+    if (k == 0)
+      glColor3f(1.0f, 0.0f, 0.0f);
+    else
+      glColor3f(0.0f, 1.0f, 0.0f);
+    glBegin(GL_POINTS);
+    for (int i = 0; i < 4; i++)
+      for (int j = 0; j < 4; j++)
+        glVertex2f(surface[k].control_pts[i][j][0], surface[k].control_pts[i][j][2]);
+    glEnd();
+  }
 
-  glColor3f(0.0f, 1.0f, 0.0f);
-  glBegin(GL_POINTS);
-  glVertex2f(line_points[0][0], line_points[0][2]);
-  glVertex2f(line_points[1][0], line_points[1][2]);
-  glEnd();
-
-  glBegin(GL_LINES);
-  glVertex2f(line_points[0][0], line_points[0][2]);
-  glVertex2f(line_points[1][0], line_points[1][2]);
-  glEnd();
-
-  glColor3f(1.0f, 0.0f, 0.0f);
-  glBegin(GL_LINES);
-  for (int i = 0; i < 4; i++)
-    for (int j = 0; j < 3; j++)
-    {
-      glVertex2f(surface.control_pts[i][j][0], surface.control_pts[i][j][2]);
-      glVertex2f(surface.control_pts[i][j + 1][0], surface.control_pts[i][j + 1][2]);
-      glVertex2f(surface.control_pts[j][i][0], surface.control_pts[j][i][2]);
-      glVertex2f(surface.control_pts[j + 1][i][0], surface.control_pts[j + 1][i][2]);
-    }
-  glEnd();
+  for (int k = 0; k < 2; k++)
+  {
+    if (k == 0)
+      glColor3f(1.0f, 0.0f, 0.0f);
+    else
+      glColor3f(0.0f, 1.0f, 0.0f);
+    glBegin(GL_LINES);
+    for (int i = 0; i < 4; i++)
+      for (int j = 0; j < 3; j++)
+      {
+        glVertex2f(surface[k].control_pts[i][j][0], surface[k].control_pts[i][j][2]);
+        glVertex2f(surface[k].control_pts[i][j + 1][0], surface[k].control_pts[i][j + 1][2]);
+        glVertex2f(surface[k].control_pts[j][i][0], surface[k].control_pts[j][i][2]);
+        glVertex2f(surface[k].control_pts[j + 1][i][0], surface[k].control_pts[j + 1][i][2]);
+      }
+    glEnd();
+  }
 
   // YZ
   glViewport(viewportwidth, 0, viewportwidth, viewportheight);
   glLoadIdentity();
   gluOrtho2D(0, (double)viewportwidth, 0, (double)viewportheight);
-  glColor3f(1.0f, 0.0f, 0.0f);
-  glBegin(GL_POINTS);
-  for (int i = 0; i < 4; i++)
-    for (int j = 0; j < 4; j++)
-      glVertex2f(surface.control_pts[i][j][1], surface.control_pts[i][j][2]);
-  glEnd();
+  for (int k = 0; k < 2; k++)
+  {
+    if (k == 0)
+      glColor3f(1.0f, 0.0f, 0.0f);
+    else
+      glColor3f(0.0f, 1.0f, 0.0f);
+    glBegin(GL_POINTS);
+    for (int i = 0; i < 4; i++)
+      for (int j = 0; j < 4; j++)
+        glVertex2f(surface[k].control_pts[i][j][1], surface[k].control_pts[i][j][2]);
+    glEnd();
+  }
 
-  glColor3f(0.0f, 1.0f, 0.0f);
-  glBegin(GL_POINTS);
-  glVertex2f(line_points[0][1], line_points[0][2]);
-  glVertex2f(line_points[1][1], line_points[1][2]);
-  glEnd();
-
-  glBegin(GL_LINES);
-  glVertex2f(line_points[0][1], line_points[0][2]);
-  glVertex2f(line_points[1][1], line_points[1][2]);
-  glEnd();
-
-  glColor3f(1.0f, 0.0f, 0.0f);
-  glBegin(GL_LINES);
-  for (int i = 0; i < 4; i++)
-    for (int j = 0; j < 3; j++)
-    {
-      glVertex2f(surface.control_pts[i][j][1], surface.control_pts[i][j][2]);
-      glVertex2f(surface.control_pts[i][j + 1][1], surface.control_pts[i][j + 1][2]);
-      glVertex2f(surface.control_pts[j][i][1], surface.control_pts[j][i][2]);
-      glVertex2f(surface.control_pts[j + 1][i][1], surface.control_pts[j + 1][i][2]);
-    }
-  glEnd();
+  for (int k = 0; k < 2; k++)
+  {
+    if (k == 0)
+      glColor3f(1.0f, 0.0f, 0.0f);
+    else
+      glColor3f(0.0f, 1.0f, 0.0f);
+    glBegin(GL_LINES);
+    for (int i = 0; i < 4; i++)
+      for (int j = 0; j < 3; j++)
+      {
+        glVertex2f(surface[k].control_pts[i][j][1], surface[k].control_pts[i][j][2]);
+        glVertex2f(surface[k].control_pts[i][j + 1][1], surface[k].control_pts[i][j + 1][2]);
+        glVertex2f(surface[k].control_pts[j][i][1], surface[k].control_pts[j][i][2]);
+        glVertex2f(surface[k].control_pts[j + 1][i][1], surface[k].control_pts[j + 1][i][2]);
+      }
+    glEnd();
+  }
 
   // 3D
   glViewport(viewportwidth, viewportheight, viewportwidth, viewportheight);
@@ -544,7 +369,7 @@ void display_callback()
   glLoadIdentity();
   gluLookAt(eye.x, eye.y, eye.z, center.x, center.y, center.z, upVector.x, upVector.y, upVector.z);
 
-  // glEnable(GL_DEPTH_TEST);
+  glEnable(GL_DEPTH_TEST);
   glBegin(GL_LINES);
   glColor3f(1.0f, 0, 0);
   glVertex3f(0, 0, 0);
@@ -557,49 +382,35 @@ void display_callback()
   glVertex3f(0, 0, 500.0f);
   glEnd();
 
-	// glColor3f(0, 0, 0);
-	// for (int i = 0; i <= RES; i += 4)
-	// {
-	// 	glBegin(GL_LINE_STRIP);
-	// 	for (int j = 0; j <= RES; j++)
-	// 		glVertex3f(points[i][j][0], points[i][j][1], points[i][j][2]);
-	// 	glEnd();
-	// }
-	// for (int i = 0; i <= RES; i += 4)
-	// {
-	// 	glBegin(GL_LINE_STRIP);
-	// 	for (int j = 0; j <= RES; j++)
-	// 		glVertex3f(points[j][i][0], points[j][i][1], points[j][i][2]);
-	// 	glEnd();
-	// }
-  //
-	glColor3f(1.0f, 0.75f, 0.75f);
-	glBegin(GL_QUADS);
-	for (int i = 0; i < RES; i++)
-	{
-		for (int j = 0; j < RES; j++)
-		{
-			glVertex3f(points[i][j][0], points[i][j][1], points[i][j][2]);
-			glVertex3f(points[i + 1][j][0], points[i + 1][j][1], points[i + 1][j][2]);
-			glVertex3f(points[i + 1][j + 1][0], points[i + 1][j + 1][1], points[i + 1][j + 1][2]);
-			glVertex3f(points[i][j + 1][0], points[i][j + 1][1], points[i][j + 1][2]);
-		}
-	}
+  glColor3f(1.0f, 0.75f, 0.75f);
+  glBegin(GL_QUADS);
+  for (int i = 0; i < RES; i++)
+  {
+    for (int j = 0; j < RES; j++)
+    {
+      glVertex3f(points[0][i][j][0], points[0][i][j][1], points[0][i][j][2]);
+      glVertex3f(points[0][i + 1][j][0], points[0][i + 1][j][1], points[0][i + 1][j][2]);
+      glVertex3f(points[0][i + 1][j + 1][0], points[0][i + 1][j + 1][1], points[0][i + 1][j + 1][2]);
+      glVertex3f(points[0][i][j + 1][0], points[0][i][j + 1][1], points[0][i][j + 1][2]);
+    }
+  }
   glEnd();
 
-  glColor3f(0.0f, 1.0f, 0.0f);
-  glBegin(GL_POINTS);
-  glVertex3f(line_points[0][0], line_points[0][1], line_points[0][2]);
-  glVertex3f(line_points[1][0], line_points[1][1], line_points[1][2]);
+  glColor3f(0, 0.75f, 0.75f);
+  glBegin(GL_QUADS);
+  for (int i = 0; i < RES; i++)
+  {
+    for (int j = 0; j < RES; j++)
+    {
+      glVertex3f(points[1][i][j][0], points[1][i][j][1], points[1][i][j][2]);
+      glVertex3f(points[1][i + 1][j][0], points[1][i + 1][j][1], points[1][i + 1][j][2]);
+      glVertex3f(points[1][i + 1][j + 1][0], points[1][i + 1][j + 1][1], points[1][i + 1][j + 1][2]);
+      glVertex3f(points[1][i][j + 1][0], points[1][i][j + 1][1], points[1][i][j + 1][2]);
+    }
+  }
   glEnd();
 
-  glBegin(GL_LINES);
-  glVertex3f(line_points[0][0], line_points[0][1], line_points[0][2]);
-  glVertex3f(line_points[1][0], line_points[1][1], line_points[1][2]);
-  glEnd();
-
-  // draw_bi(0, 0, RES, RES);
-  draw_intersect(0, 0, RES, RES);
+  draw_intersect2(0, 0, RES, RES, 0, 0, RES, RES);
   glDisable(GL_DEPTH_TEST);
 
   glutSwapBuffers();
@@ -740,11 +551,11 @@ void mouse_move_callback(GLint x, GLint y)
     y = std::max((int)viewportheight - y, 0);
     y = std::min(y, (int)viewportheight);
     if (selected >= 100) {
-      line_points[selected % 100][xx] = static_cast<float>(x);
-      line_points[selected % 100][yy] = static_cast<float>(y);
+      surface[1].control_pts[(selected - 100) / 10][selected % 10][xx] = static_cast<float>(x);
+      surface[1].control_pts[(selected - 100) / 10][selected % 10][yy] = static_cast<float>(y);
     } else {
-      surface.control_pts[selected / 10][selected % 10][xx] = static_cast<float>(x);
-      surface.control_pts[selected / 10][selected % 10][yy] = static_cast<float>(y);
+      surface[0].control_pts[selected / 10][selected % 10][xx] = static_cast<float>(x);
+      surface[0].control_pts[selected / 10][selected % 10][yy] = static_cast<float>(y);
     }
     calc_surface();
   }
